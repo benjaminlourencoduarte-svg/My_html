@@ -682,15 +682,30 @@ function startSimulatedProcess(fileRec){
   }, 1000);
   proc.timers.push(tick);
   proc.timers.push(setTimeout(()=> { if(proc.status === 'running') terminateProcess(pid,'auto_stop'); }, 1000*60*10));
-}
-function makeDemoPopupHtml(name, pid){
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Isolated Desktop — ${escapeHtml(name)}</title>
-  <style>body{margin:0;font-family:Arial;background:linear-gradient(120deg,#0b3b6f,#052b43);color:#fff} .bar{height:44px;background:rgba(0,0,0,0.2);display:flex;align-items:center;padding:8px;gap:8px} .box{padding:18px}</style></head><body>
-  <div class="bar"><div style="font-weight:700">Isolated Fake Desktop — ${escapeHtml(name)} (pid ${pid})</div><div style="margin-left:auto">Simulated</div></div>
-  <div class="box"><p>This window simulates an isolated desktop where the fake program runs visually. This popup never executes your file.</p>
-  <canvas id="c" width="800" height="420" style="border-radius:8px;display:block;background:#000"></canvas></div>
+}function makeDemoPopupHtml(name, pid) {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Isolated Desktop — ${escapeHtml(name)}</title>
+  <style>
+    body{margin:0;font-family:Arial;background:linear-gradient(120deg,#0b3b6f,#052b43);color:#fff}
+    .bar{height:44px;background:rgba(0,0,0,0.2);display:flex;align-items:center;padding:8px;gap:8px}
+    .box{padding:18px}
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <div style="font-weight:700">Isolated Fake Desktop — ${escapeHtml(name)} (pid ${pid})</div>
+    <div style="margin-left:auto">Simulated</div>
+  </div>
+  <div class="box">
+    <p>This window simulates an isolated desktop where the fake program runs visually. This popup never executes your file.</p>
+    <canvas id="c" width="800" height="420" style="border-radius:8px;display:block;background:#000"></canvas>
+  </div>
   <script>
-    const canvas=document.getElementById('c'),ctx=canvas.getContext('2d'); let t=0;
+    const canvas=document.getElementById('c'), ctx=canvas.getContext('2d');
+    let t=0;
     function loop(){
       t+=0.02;
       ctx.fillStyle='rgba(0,0,0,0.12)';
@@ -711,8 +726,12 @@ function makeDemoPopupHtml(name, pid){
         }
       }catch(e){}
     });
-  </script></body></html>`;
+  </script>
+</body>
+</html>`;
 }
+
+
 
 async function handleEscape(proc){
   log(`Escape detected for ${proc.name} (pid ${proc.pid}). Initiating containment.`);
