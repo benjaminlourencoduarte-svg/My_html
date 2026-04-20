@@ -39,7 +39,7 @@ let isolation = true;
 let files = [];
 
 function log(msg) {
-  document.getElementById('log').innerHTML += `<div>${new Date().toLocaleTimeString()} — ${msg}</div>`;
+  document.getElementById('log').innerHTML += '<div>' + new Date().toLocaleTimeString() + ' — ' + msg + '</div>';
 }
 
 function switchDrive(name) {
@@ -61,7 +61,10 @@ function renderExplorer() {
   const explorer = document.getElementById('explorer');
   explorer.innerHTML = '<h3>File Explorer</h3>';
   files.forEach(f=>{
-    explorer.innerHTML += `<div onclick="inspectFile('${f.name}')">${f.drive}\\${f.name} (${f.size} bytes)</div>`;
+    const div = document.createElement('div');
+    div.textContent = f.drive + '\\' + f.name + ' (' + f.size + ' bytes)';
+    div.onclick = ()=>inspectFile(f.name);
+    explorer.appendChild(div);
   });
 }
 
@@ -79,11 +82,11 @@ function renderFileSelect() {
 function inspectFile(name) {
   const f = files.find(x=>x.name===name);
   const inspector = document.getElementById('inspector');
-  inspector.innerHTML = `<h3>Inspector</h3>
-    <p>Name: ${f.name}</p>
-    <p>Drive: ${f.drive}</p>
-    <p>Size: ${f.size} bytes</p>
-    <button onclick="simulateRun('${f.name}')">Run in Fake VM</button>`;
+  inspector.innerHTML = '<h3>Inspector</h3>'
+    + '<p>Name: ' + f.name + '</p>'
+    + '<p>Drive: ' + f.drive + '</p>'
+    + '<p>Size: ' + f.size + ' bytes</p>'
+    + '<button onclick="simulateRun(\'' + f.name + '\')">Run in Fake VM</button>';
 }
 
 function toggleIsolation() {
@@ -99,7 +102,7 @@ function addToDesktop() {
   const icon = document.createElement('div');
   icon.className = 'desktop-icon';
   icon.textContent = name;
-  icon.onclick = ()=>simulateRun(name); // run inside VM when clicked
+  icon.onclick = ()=>simulateRun(name);
   desktop.appendChild(icon);
   log('Added ' + name + ' to desktop');
 }
@@ -108,6 +111,7 @@ function simulateRun(name) {
   const pid = Math.floor(Math.random()*10000);
   const popup = window.open('', '', 'width=900,height=600');
   popup.document.write(makeDemoPopupHtml(name, pid));
+  popup.document.close();
   log('Simulated run of ' + name + ' (pid ' + pid + ') inside VM');
 }
 
@@ -118,52 +122,51 @@ function escapeHtml(str) {
 }
 
 function makeDemoPopupHtml(name, pid) {
-  return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Isolated Desktop — ${escapeHtml(name)}</title>
-  <style>
-    body{margin:0;font-family:Arial;background:linear-gradient(120deg,#0b3b6f,#052b43);color:#fff}
-    .bar{height:44px;background:rgba(0,0,0,0.2);display:flex;align-items:center;padding:8px;gap:8px}
-    .box{padding:18px}
-  </style>
-</head>
-<body>
-  <div class="bar">
-    <div style="font-weight:700">Isolated Fake Desktop — ${escapeHtml(name)} (pid ${pid})</div>
-    <div style="margin-left:auto">Simulated</div>
-  </div>
-  <div class="box">
-    <p>This window simulates an isolated desktop where the fake program runs visually. This popup never executes your file.</p>
-    <canvas id="c" width="800" height="420" style="border-radius:8px;display:block;background:#000"></canvas>
-  </div>
-  <script>
-    const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
-    let t=0;
-    function loop(){
-      t+=0.02;
-      ctx.fillStyle='rgba(0,0,0,0.12)';
-      ctx.fillRect(0,0,canvas.width,canvas.height);
-      for(let i=0;i<40;i++){
-        ctx.fillStyle='hsla(' + ((t*40+i*7)%360) + ',80%,60%,0.25)';
-        ctx.fillRect((Math.sin(t+i)*0.5+0.5)*canvas.width,(Math.cos(t+i)*0.5+0.5)*canvas.height,40,28);
-      }
-      requestAnimationFrame(loop);
-    }
-    loop();
-    window.addEventListener('message',(ev)=>{
-      try{
-        const d=ev.data;
-        if(d && d.type==='sim_tick' && d.pid===${pid}){
-          // handle tick
-        }
-      }catch(e){}
-    });
-  </script>
-</body>
-</html>`;
+  return '<!doctype html>\n'
+    + '<html>\n'
+    + '<head>\n'
+    + '<meta charset="utf-8">\n'
+    + '<title>Isolated Desktop — ' + escapeHtml(name) + '</title>\n'
+    + '<style>\n'
+    + 'body{margin:0;font-family:Arial;background:linear-gradient(120deg,#0b3b6f,#052b43);color:#fff}\n'
+    + '.bar{height:44px;background:rgba(0,0,0,0.2);display:flex;align-items:center;padding:8px;gap:8px}\n'
+    + '.box{padding:18px}\n'
+    + '</style>\n'
+    + '</head>\n'
+    + '<body>\n'
+    + '<div class="bar">\n'
+    + '<div style="font-weight:700">Isolated Fake Desktop — ' + escapeHtml(name) + ' (pid ' + pid + ')</div>\n'
+    + '<div style="margin-left:auto">Simulated</div>\n'
+    + '</div>\n'
+    + '<div class="box">\n'
+    + '<p>This window simulates an isolated desktop where the fake program runs visually. This popup never executes your file.</p>\n'
+    + '<canvas id="c" width="800" height="420" style="border-radius:8px;display:block;background:#000"></canvas>\n'
+    + '</div>\n'
+    + '<script>\n'
+    + 'const canvas=document.getElementById("c"),ctx=canvas.getContext("2d");\n'
+    + 'let t=0;\n'
+    + 'function loop(){\n'
+    + '  t+=0.02;\n'
+    + '  ctx.fillStyle="rgba(0,0,0,0.12)";\n'
+    + '  ctx.fillRect(0,0,canvas.width,canvas.height);\n'
+    + '  for(let i=0;i<40;i++){\n'
+    + '    ctx.fillStyle="hsla(" + ((t*40+i*7)%360) + ",80%,60%,0.25)";\n'
+    + '    ctx.fillRect((Math.sin(t+i)*0.5+0.5)*canvas.width,(Math.cos(t+i)*0.5+0.5)*canvas.height,40,28);\n'
+    + '  }\n'
+    + '  requestAnimationFrame(loop);\n'
+    + '}\n'
+    + 'loop();\n'
+    + 'window.addEventListener("message",(ev)=>{\n'
+    + '  try{\n'
+    + '    const d=ev.data;\n'
+    + '    if(d && d.type==="sim_tick" && d.pid===' + pid + '){ }\n'
+    + '  }catch(e){}\n'
+    + '});\n'
+    + '</script>\n'
+    + '</body>\n'
+    + '</html>\n';
 }
+
 </script>
 </body>
 </html>
