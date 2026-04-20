@@ -690,10 +690,30 @@ function makeDemoPopupHtml(name, pid){
   <div class="box"><p>This window simulates an isolated desktop where the fake program runs visually. This popup never executes your file.</p>
   <canvas id="c" width="800" height="420" style="border-radius:8px;display:block;background:#000"></canvas></div>
   <script>
-    const canvas=document.getElementById('c'),ctx=canvas.getContext('2d'); let t=0; function loop(){ t+=0.02; ctx.fillStyle='rgba(0,0,0,0.12)'; ctx.fillRect(0,0,canvas.width,canvas.height); for(let i=0;i<40;i++){ ctx.fillStyle='hsla(' + ((t*40+i*7)%360) + ',80%,60%,0.25)'; ctx.fillRect((Math.sin(t+i)*0.5+0.5)*canvas.width, (Math.cos(t+i)*0.5+0.5)*canvas.height, 40, 28); } requestAnimationFrame(loop); } loop();
-    window.addEventListener('message',(ev)=>{ try{ const d=ev.data; if(d && d.type === 'sim_tick' && d.pid === ${pid}){} }catch(e){}});
-  </script></body></html>;
+    const canvas=document.getElementById('c'),ctx=canvas.getContext('2d'); let t=0;
+    function loop(){
+      t+=0.02;
+      ctx.fillStyle='rgba(0,0,0,0.12)';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      for(let i=0;i<40;i++){
+        ctx.fillStyle='hsla(' + ((t*40+i*7)%360) + ',80%,60%,0.25)';
+        ctx.fillRect((Math.sin(t+i)*0.5+0.5)*canvas.width, (Math.cos(t+i)*0.5+0.5)*canvas.height, 40, 28);
+      }
+      requestAnimationFrame(loop);
+    }
+    loop();
+
+    window.addEventListener('message',(ev)=>{
+      try{
+        const d=ev.data;
+        if(d && d.type === 'sim_tick' && d.pid === ${pid}){
+          // handle tick here
+        }
+      }catch(e){}
+    });
+  </script></body></html>`;
 }
+
 async function handleEscape(proc){
   log(`Escape detected for ${proc.name} (pid ${proc.pid}). Initiating containment.`);
   const maxAttempts = 8; let attempts = 0;
