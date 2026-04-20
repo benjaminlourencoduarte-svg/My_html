@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Fake VM v4 — Safe Isolated Runner + Auto-Analyzer (Fixed v3)</title>
+  <style>
+    :root{--bg:#07101a;--panel:#0b1220;--muted:#94a3b8;--accent:#1d8cff;--danger:#ff6b6b}
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial;background:linear-gradient(180deg,#0b1220,#07101a);color:#e6eef8}
+    .app{display:flex;gap:12px;padding:12px;height:100vh}
+    .sidebar{width:360px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px}
+    .main{flex:1;display:flex;flex-direction:column;gap:12px}
+    .card{background:var(--panel);border-radius:10px;padding:12px;box-shadow:0 6px 20px rgba(2,6,23,0.6)}
+    h2{margin:0 0 8px 0;font-size:14px;color:#d7e8ff}
+    .muted{color:var(--muted);font-size:13px}
+    .controls{display:flex;gap:8px;align-items:center}
+    .btn{background:linear-gradient(180deg,var(--accent),#1367d6);color:#fff;border:none;padding:8px 10px;border-radius:8px;cursor:pointer;font-weight:600}
+    .btn.secondary{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
+    .btn.warn{background:linear-gradient(180deg,#ff8a5b,#ff7043)}
+    input[type="text"],select{width:100%;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:rgba(255,255,255,0.02);color:#e6eef8}
+    input[type="file"]{color:#e6eef8}
+    pre{background:#071827;padding:8px;border-radius:6px;color:#c8e1ff;max-height:200px;overflow:auto}
+    .row{display:flex;gap:8px;align-items:center}
+    .badge{background:rgba(255,255,255,0.03);padding:6px 8px;border-radius:6px;color:var(--muted);font-size:12px}
+    .danger{color:var(--danger); font-weight:700}
+    .files-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+    .file-card{padding:10px;border-radius:8px;background:rgba(255,255,255,0.02);cursor:pointer;display:flex;flex-direction:column;gap:8px}
+    .process-list{max-height:200px;overflow:auto}
+    .log{max-height:160px;overflow:auto;background:#071827;padding:8px;border-radius:6px}
+    .note{font-size:13px;color:#f3f4f6}
+    .tag{font-size:12px;padding:4px 6px;border-radius:6px;background:rgba(255,255,255,0.02);display:inline-block}
+    .muted-block { color:var(--muted); font-size:12px; margin-top:6px; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="sidebar card">
+      <h2>Fake VM — Safe Isolated Runner + Auto-Analyzer (Fixed v3)</h2>
+      <div class="muted">Safe simulation only. Files are stored inertly (IndexedDB) and never executed. Imported files are statically analyzed and heuristically tagged "malicious" for demonstration if indicators are found. Isolation is ON by default (host saves disabled).</div>
+
+      <div>
+        <label>Drives</label>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="driveC" class="btn secondary">C_FAKE_AAAAAa:</button>
+          <button id="driveG" class="btn secondary">system23_VM_FAKE_G</button>
+        </div>
+        <div class="muted-block">Selected drive: <span id="selectedDrive" class="badge">C_FAKE_AAAAAa:</span></div>
+      </div>
+
+      <div>
+        <label>Import local file (safe storage)</label>
+        <input id="filePicker" type="file" />
+        <div class="row" style="margin-top:8px">
+          <button id="importLocal" class="btn">Import & Auto-Analyze</button>
+          <button id="forceTagNext" class="btn secondary">Force next import tag: malicious</button>
+        </div>
+      </div>
+
+      <div>
+        <label>Import from URL (raw)</label>
+        <input id="urlInput" type="text" placeholder="Paste raw file URL (e.g. raw.githubusercontent.com/...)" />
+        <div class="row" style="margin-top:8px">
+          <button id="importUrl" class="btn">Fetch & Auto-Analyze</button>
+          <button id="fetchPreview" class="btn secondary">Preview first 512B</button>
+        </div>
+        <div class="muted-block">If fetch is blocked by CORS, download separately and use the local file picker.</div>
+      </div>
+
+      <div>
+        <label>Isolation & Auto-Response</label>
+        <div class="row" style="margin-top:8px">
+          <button id="toggleIsolation" class="btn secondary">Isolation: ON</button>
+          <div id="isolationStatus" class="badge">ON</div>
+        </div>
+        <div class="muted-block">When Isolation is ON, saving files to host is disabled; containment responses are automatic on simulated escape.</div>
+      </div>
+
+      <div>
+        <label>Active simulated processes</label>
+        <div id="processList" class="process-list muted" style="margin-top:8px">No processes</div>
+        <div style="margin-top:8px" class="row">
+          <button id="taskkillAll" class="btn warn">TaskKill All (Sim)</button>
+          <button id="viewLog" class="btn secondary">View Log</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="card" style="display:flex;justify-content:space-between;align-items:center">
+        <div class="muted">Explorer — files stored in IndexedDB (inert)</div>
+        <div><span class="muted">Stored files:</span> <span id="fileCount" class="badge">0</span></div>
+      </div>
+
+      <div class="card" style="padding:12px; display:flex; gap:12px;">
+        <div style="flex:1">
+          <div><strong>Drive contents</strong></div>
+          <div id="filesGrid" class="files-grid" style="margin-top:8px"></div>
+        </div>
+
+        <div style="width:480px">
+          <div><strong>Inspector & Actions</strong></div>
+          <div id="reportArea" style="margin-top:8px; max-height:540px; overflow:auto"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div><strong>Event Log</strong></div>
+          <div class="note">All events are simulated. No code is executed.</div>
+        </div>
+        <div id="logArea" class="log" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/*
+  Fixed safe simulator v3:
+  - Ensures complete, syntactically-correct JS (previous SyntaxError fixed)
+  - Robust IndexedDB storage for File/Blob objects
+  - Event log initialization
+  - Force-next-import and per-file force-tagging
+  - Auto static analysis and auto-tagging heuristics
+  - Safe simulated "Run (Isolated)" and containment workflow
+*/
+
+/* ---------- Storage layer ---------- */
+const DB_NAME = 'vps_fake_vm_db';
+const DB_STORE = 'files';
+const DRIVES = ['C_FAKE_AAAAAa:', 'system23_VM_FAKE_G'];
+let selectedDrive = DRIVES[0];
+let isolationOn = true;
+let nextImportForceTag = ''; // 'malicious' when set
+
+function openDB(){
+  return new Promise((resolve,reject)=>{
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if(!db.objectStoreNames.contains(DB_STORE)){
+        db.createObjectStore(DB_STORE, { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function putFileRecord(record, blob){
+  let storeBlob = blob;
+  try {
+    if(!(storeBlob instanceof Blob)){
+      storeBlob = new Blob([storeBlob], { type: 'application/octet-stream' });
+    }
+  } catch(e){
+    storeBlob = new Blob([storeBlob], { type: 'application/octet-stream' });
+  }
+
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(DB_STORE, 'readwrite');
+    const store = tx.objectStore(DB_STORE);
+    const full = Object.assign({}, record, { data: storeBlob });
+    const r = store.put(full);
+    r.onsuccess = ()=> resolve(r.result);
+    r.onerror = (err)=> reject(err);
+  });
+}
+
+async function getAllFiles(){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(DB_STORE,'readonly');
+    const store = tx.objectStore(DB_STORE);
+    const req = store.getAll();
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+}
+
+async function getFileById(id){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(DB_STORE,'readonly');
+    const req = tx.objectStore(DB_STORE).get(id);
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+}
+
+async function deleteFileById(id){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(DB_STORE,'readwrite');
+    const req = tx.objectStore(DB_STORE).delete(id);
+    req.onsuccess = ()=> resolve();
+    req.onerror = ()=> reject(req.error);
+  });
+}
+
+async function clearAllFiles(){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(DB_STORE,'readwrite');
+    const req = tx.objectStore(DB_STORE).clear();
+    req.onsuccess = ()=> resolve();
+    req.onerror = ()=> reject(req.error);
+  });
+}
+
+/* ---------- Logging & helpers ---------- */
+const logArea = document.getElementById('logArea');
+function log(msg){
+  const t = new Date().toLocaleTimeString();
+  logArea.innerHTML = `<div>[${t}] ${escapeHtml(msg)}</div>` + logArea.innerHTML;
+}
+function escapeHtml(s){ return (s+'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function uid(){ return 'f_' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
+
+/* initialize log */
+log('Simulator ready. Event log initialized.');
+
+/* ---------- UI refs ---------- */
+const filePicker = document.getElementById('filePicker');
+const importLocal = document.getElementById('importLocal');
+const forceTagNextBtn = document.getElementById('forceTagNext');
+const filesGrid = document.getElementById('filesGrid');
+const reportArea = document.getElementById('reportArea');
+const fileCountEl = document.getElementById('fileCount');
+const driveC = document.getElementById('driveC');
+const driveG = document.getElementById('driveG');
+const selectedDriveEl = document.getElementById('selectedDrive');
+const toggleIsolation = document.getElementById('toggleIsolation');
+const isolationStatus = document.getElementById('isolationStatus');
+const processListEl = document.getElementById('processList');
+const taskkillAllBtn = document.getElementById('taskkillAll');
+const viewLogBtn = document.getElementById('viewLog');
+const importUrlBtn = document.getElementById('importUrl');
+const urlInput = document.getElementById('urlInput');
+const fetchPreview = document.getElementById('fetchPreview');
+
+/* ---------- Drive & isolation UI ---------- */
+driveC.addEventListener('click', ()=> { selectedDrive = DRIVES[0]; selectedDriveEl.textContent = selectedDrive; refreshAll(); });
+driveG.addEventListener('click', ()=> { selectedDrive = DRIVES[1]; selectedDriveEl.textContent = selectedDrive; refreshAll(); });
+
+toggleIsolation.addEventListener('click', ()=> {
+  isolationOn = !isolationOn;
+  toggleIsolation.textContent = 'Isolation: ' + (isolationOn ? 'ON' : 'OFF');
+  isolationStatus.textContent = (isolationOn ? 'ON' : 'OFF');
+  log('Isolation set to ' + (isolationOn ? 'ON' : 'OFF'));
+});
+
+/* Force next import tag */
+forceTagNextBtn.addEventListener('click', ()=> {
+  nextImportForceTag = 'malicious';
+  alert('Next import will be forced-tagged as "malicious".');
+  log('User set next import to be force-tagged as malicious.');
+});
+
+/* ---------- Analysis utilities (static-only) ---------- */
+function u8(ab){ return new Uint8Array(ab); }
+function readU16(u,o){ return u[o] | (u[o+1]<<8); }
+function readU32(u,o){ return (u[o]) | (u[o+1]<<8) | (u[o+2]<<16) | (u[o+3]<<24) >>> 0; }
+function computeEntropy(arr){
+  const counts = new Uint32Array(256);
+  for(const b of arr) counts[b]++;
+  const n = arr.length;
+  if(n===0) return 0;
+  let e = 0;
+  for(let i=0;i<256;i++) if(counts[i]){ const p = counts[i]/n; e -= p*Math.log2(p); }
+  return e;
+}
+function extractAscii(arr, minLen=4){
+  let cur='', out=[];
+  for(let i=0;i<arr.length;i++){
+    const c = arr[i];
+    if(c>=32 && c<=126) cur += String.fromCharCode(c);
+    else { if(cur.length>=minLen) out.push(cur); cur=''; }
+  }
+  if(cur.length>=minLen) out.push(cur);
+  return out;
+}
+function hexSnippet(buf, max=256){
+  const bytes = new Uint8Array(buf).slice(0,max);
+  let s='';
+  for(let i=0;i<bytes.length;i+=16){
+    const chunk = bytes.slice(i,i+16);
+    const hex = Array.from(chunk).map(b=>b.toString(16).padStart(2,'0')).join(' ');
+    const ascii = Array.from(chunk).map(b => (b>=32 && b<=126) ? String.fromCharCode(b) : '.').join('');
+    s += hex.padEnd(16*3) + '  ' + ascii + '\n';
+  }
+  return s;
+}
+function parseSections(u, ntOff, numSec){
+  const sizeOpt = readU16(u, ntOff+20);
+  let off = ntOff + 24 + sizeOpt;
+  const secs=[];
+  for(let i=0;i<numSec;i++){
+    const name = String.fromCharCode(...u.slice(off, off+8)).replace(/\0.*$/,'');
+    const VirtualSize = readU32(u, off+8);
+    const VirtualAddress = readU32(u, off+12);
+    const SizeOfRawData = readU32(u, off+16);
+    const PointerToRawData = readU32(u, off+20);
+    secs.push({ name, VirtualSize, VirtualAddress, SizeOfRawData, PointerToRawData });
+    off += 40;
+  }
+  return secs;
+}
+function rvaToOffset(secs, rva){
+  for(const s of secs){
+    const va = s.VirtualAddress;
+    const size = s.VirtualSize || s.SizeOfRawData;
+    if(rva >= va && rva < va + size) return s.PointerToRawData + (rva - va);
+  }
+  return null;
+}
+function parseImports(u, sections, optHdrOff, isPE32Plus){
+  const dataDirOff = optHdrOff + (isPE32Plus ? 112 : 96);
+  const importRVA = readU32(u, dataDirOff + 8);
+  const imports = [];
+  if(!importRVA) return imports;
+  const impOff = rvaToOffset(sections, importRVA);
+  if(impOff === null) return imports;
+  let p = impOff;
+  while(true){
+    const OrigFirst = readU32(u,p);
+    const NameRVA = readU32(u,p+12);
+    const FirstThunk = readU32(u,p+16);
+    if(OrigFirst===0 && NameRVA===0 && FirstThunk===0) break;
+    const nameOff = rvaToOffset(sections, NameRVA);
+    let dllName = '<unknown>';
+    if(nameOff !== null){
+      let q = nameOff, s='';
+      while(u[q] !== 0){ s += String.fromCharCode(u[q]); q++; }
+      dllName = s;
+    }
+    const iltRVA = OrigFirst || FirstThunk;
+    const iltOff = rvaToOffset(sections, iltRVA);
+    const funcs=[];
+    if(iltOff !== null){
+      let r = iltOff;
+      while(true){
+        const ent = readU32(u, r);
+        if(ent===0) break;
+        const isOrd = !!(ent & 0x80000000);
+        if(isOrd) funcs.push({ ordinal: ent & 0xffff });
+        else {
+          const hnOff = rvaToOffset(sections, ent);
+          if(hnOff !== null){
+            const hint = readU16(u, hnOff);
+            let nm = '', t = hnOff+2;
+            while(u[t] !== 0){ nm += String.fromCharCode(u[t]); t++; }
+            funcs.push({ name: nm, hint });
+          } else funcs.push({ name: '<unknown>' });
+        }
+        r += 4;
+      }
+    }
+    imports.push({ dll: dllName.toLowerCase(), functions: funcs });
+    p += 20;
+  }
+  return imports;
+}
+function detectCppArtifacts(u, sections){
+  const rdata = sections.find(s => s.name.toLowerCase().includes('.rdata')) || sections.find(s => s.name.toLowerCase().includes('.data'));
+  const parts = [];
+  if(rdata) parts.push(u.slice(rdata.PointerToRawData, rdata.PointerToRawData + rdata.SizeOfRawData));
+  else parts.push(u);
+  const res = { msvc_mangled:false, typeinfo:false, samples:[] };
+  for(const bytes of parts){
+    const strs = extractAscii(bytes,3).slice(0,200);
+    const joined = strs.join(' ');
+    if(/\?\?_|^\?/.test(joined) || /(\?AV|\?A)/.test(joined)) res.msvc_mangled = true;
+    if(joined.includes('type_info') || joined.includes('typeinfo')) res.typeinfo = true;
+    res.samples.push(strs.slice(0,50));
+  }
+  return res;
+}
+function detectGdi(u, imports, allStrings){
+  const gdiNames = ['gdi32.dll','gdiplus.dll','user32.dll'];
+  const gdiFuncs = ['BitBlt','CreateCompatibleDC','Gdip','DrawText','SelectObject','GetDC','ReleaseDC','SetPixel','AlphaBlend'];
+  const dynamicApis = ['getprocaddress','loadlibrarya','loadlibraryw','virtualalloc','virtualprotect','createthread'];
+  const found = { importedGdi: [], importedDynamic: [], stringMatches: [], importMatches: [] };
+  for(const imp of imports){
+    if(gdiNames.some(g => imp.dll.includes(g))) found.importedGdi.push(imp.dll);
+    for(const f of imp.functions){
+      if(f.name && gdiFuncs.some(g => f.name.toLowerCase().includes(g.toLowerCase()))) found.importMatches.push({ dll: imp.dll, fn: f.name });
+      if(f.name && dynamicApis.some(d => f.name.toLowerCase().includes(d))) found.importedDynamic.push({ dll: imp.dll, fn: f.name });
+    }
+  }
+  const joined = allStrings.join(' ').toLowerCase();
+  for(const g of gdiFuncs) if(joined.includes(g.toLowerCase())) found.stringMatches.push(g);
+  if(joined.includes('getprocaddress') || joined.includes('loadlibrary')) found.importedDynamic.push({ dll: 'via-strings' });
+  return found;
+}
+function inspectOverlay(u, sections){
+  const last = sections.reduce((a,b)=> ((a.PointerToRawData + a.SizeOfRawData) > (b.PointerToRawData + b.SizeOfRawData) ? a : b));
+  const endLast = last.PointerToRawData + last.SizeOfRawData;
+  const overlaySize = u.length > endLast ? u.length - endLast : 0;
+  const overlayOffset = overlaySize ? endLast : null;
+  if(!overlaySize) return { overlaySize:0 };
+  const slice = u.slice(overlayOffset, overlayOffset + Math.min(overlaySize, 1024*16));
+  const strings = extractAscii(slice,4).slice(0,200);
+  function findSig(sig){
+    const sigU = (sig instanceof Uint8Array) ? sig : new Uint8Array(Array.from(sig).map(c=>c.charCodeAt(0)));
+    for(let i=0;i<slice.length - sigU.length;i++){
+      let ok=true;
+      for(let j=0;j<sigU.length;j++) if(slice[i+j] !== sigU[j]){ ok=false; break; }
+      if(ok) return overlayOffset + i;
+    }
+    return -1;
+  }
+  const bmp = findSig('BM');
+  const png = findSig(new Uint8Array([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]));
+  const jpg = findSig(new Uint8Array([0xFF,0xD8,0xFF]));
+  return { overlaySize, overlayOffset, entropy: computeEntropy(slice), sampleStrings: strings, bmpAt: bmp, pngAt: png, jpgAt: jpg };
+}
+function analyzeAll(ab){
+  const u = u8(ab);
+  if(u[0] !== 0x4d || u[1] !== 0x5a) return { error: 'Not PE (missing MZ)' };
+  const e_lfanew = readU32(u, 0x3c);
+  const ntOff = e_lfanew;
+  if(String.fromCharCode(u[ntOff],u[ntOff+1],u[ntOff+2],u[ntOff+3]) !== 'PE\0\0') return { error: 'Invalid PE' };
+  const machine = readU16(u, ntOff+4);
+  const numberOfSections = readU16(u, ntOff+6);
+  const optHdrOff = ntOff + 24;
+  const magic = readU16(u, optHdrOff);
+  const isPE32Plus = magic === 0x20b;
+  const sections = parseSections(u, ntOff, numberOfSections);
+  const sectionInfo = sections.map(s => {
+    const start = s.PointerToRawData || 0;
+    const len = s.SizeOfRawData || 0;
+    const slice = u.slice(start, start + len);
+    return { name: s.name, rawSize: len, vSize: s.VirtualSize, entropy: computeEntropy(slice) };
+  });
+  const imports = parseImports(u, sections, optHdrOff, isPE32Plus);
+  const allStrings = extractAscii(u, 4);
+  const cpp = detectCppArtifacts(u, sections);
+  const gdi = detectGdi(u, imports, allStrings);
+  const overlay = inspectOverlay(u, sections);
+  return {
+    machine, isPE32Plus, numberOfSections, sectionInfo, importsSummary: imports.map(i=>i.dll),
+    imports, cpp, gdi, overlay, sampleHex: hexSnippet(ab, 512)
+  };
+}
+
+/* Heuristic for auto-tagging */
+function shouldTagMalicious(report){
+  if(!report || report.error) return false;
+  if(report.gdi && ((report.gdi.importedGdi && report.gdi.importedGdi.length) || (report.gdi.importMatches && report.gdi.importMatches.length) || (report.gdi.stringMatches && report.gdi.stringMatches.length))) return true;
+  if(report.overlay && report.overlay.overlaySize && (report.overlay.bmpAt >=0 || report.overlay.pngAt >=0 || report.overlay.jpgAt >=0)) return true;
+  if(report.sectionInfo && report.sectionInfo.some(s => s.entropy && s.entropy > 7.5)) return true;
+  const dynamicMarkers = ['getprocaddress','loadlibrary','virtualalloc','virtualprotect','createthread'];
+  if(report.imports && report.imports.some(imp => imp.functions && imp.functions.some(f => f.name && dynamicMarkers.some(m => f.name.toLowerCase().includes(m))))) return true;
+  return false;
+}
+
+/* ---------- Import & UI logic ---------- */
+async function normalizeFileToBlob(file){
+  if(file instanceof Blob) return file;
+  try {
+    const ab = await file.arrayBuffer();
+    return new Blob([ab], { type: 'application/octet-stream' });
+  } catch(e){
+    return new Blob([file], { type: 'application/octet-stream' });
+  }
+}
+
+importLocal.addEventListener('click', async () => {
+  const files = filePicker.files;
+  if(!files || files.length === 0) return alert('Choose a file first.');
+  const f = files[0];
+  if(!confirm('Import ' + f.name + ' into ' + selectedDrive + ' as inert blob? (This will NOT execute the file)')) return;
+  const id = uid();
+  const forcedTag = nextImportForceTag || '';
+  nextImportForceTag = '';
+  const rec = { id, name: f.name, size: f.size, created: Date.now(), drive: selectedDrive, tag: forcedTag };
+  try {
+    const blob = await normalizeFileToBlob(f);
+    await putFileRecord(rec, blob);
+    log('Imported ' + f.name + ' into ' + selectedDrive + (forcedTag ? ' (force-tagged: ' + forcedTag + ')' : ''));
+    await refreshAll();
+    const ab = await blob.arrayBuffer();
+    const report = analyzeAll(ab);
+    if(!rec.tag && shouldTagMalicious(report)){
+      rec.tag = 'malicious';
+      await putFileRecord(rec, blob);
+      log('Auto-tagged imported file as malicious: ' + f.name);
+    }
+    showReport(rec, report);
+    await refreshAll();
+  } catch(err){
+    console.error(err);
+    alert('Failed to store file into VM storage: ' + err);
+    log('Error storing file: ' + err);
+  }
+});
+
+/* Fetch & import from URL (runs in browser) */
+fetchPreview.addEventListener('click', async ()=>{
+  const url = urlInput.value.trim();
+  if(!url) return alert('Enter a URL first');
+  try {
+    const res = await fetch(url, { method: 'GET' });
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const buf = await res.arrayBuffer();
+    const hex = hexSnippet(buf, 512);
+    reportArea.innerHTML = `<div><strong>Preview of first bytes (hex+ascii):</strong></div><pre>${escapeHtml(hex)}</pre>`;
+  } catch(err){
+    alert('Fetch preview failed: ' + err);
+  }
+});
+
+importUrlBtn.addEventListener('click', async ()=>{
+  const url = urlInput.value.trim();
+  if(!url) return alert('Enter a URL first');
+  if(!confirm('Fetch '+url+' into this browser and import into '+selectedDrive+'? (Runs in your browser; file will be stored in IndexedDB)')) return;
+  try {
+    const res = await fetch(url, { method: 'GET' });
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const blob = await res.blob();
+    const name = url.split('/').pop().split('?')[0] || ('file-'+Date.now());
+    const id = uid();
+    const rec = { id, name, size: blob.size || 0, created: Date.now(), drive: selectedDrive, tag: nextImportForceTag || '' };
+    nextImportForceTag = '';
+    await putFileRecord(rec, blob);
+    log('Fetched and stored ' + name + ' into ' + selectedDrive);
+    await refreshAll();
+    try {
+      const ab = await (new Response(blob)).arrayBuffer();
+      const report = analyzeAll(ab);
+      if(!rec.tag && shouldTagMalicious(report)){
+        rec.tag = 'malicious';
+        await putFileRecord(rec, blob);
+        log('Auto-tagged fetched file as malicious: ' + name);
+      }
+      showReport(rec, report);
+      await refreshAll();
+    } catch(err){
+      reportArea.innerHTML = '<div class="muted">Analysis failed: '+String(err)+'</div>';
+    }
+  } catch(err){
+    alert('Fetch failed: ' + err);
+    log('Fetch error: ' + err);
+  }
+});
+
+/* ---------- Files listing & per-file actions ---------- */
+async function refreshAll(){
+  const all = await getAllFiles();
+  renderFiles(all);
+  fileCountEl.textContent = all.length;
+  renderProcessList();
+}
+
+function renderFiles(list){
+  filesGrid.innerHTML = '';
+  if(!list || list.length === 0){ filesGrid.innerHTML = '<div class="muted">No files in VM storage</div>'; return; }
+  list.slice().reverse().forEach(f=>{
+    const tagHtml = f.tag ? `<div class="tag">${escapeHtml(f.tag)}</div>` : '';
+    const el = document.createElement('div'); el.className = 'file-card';
+    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-weight:700">${escapeHtml(f.name)}</div>${tagHtml}</div>
+      <div class="muted">${escapeHtml(f.drive)} · ${(f.size/1024).toFixed(1)} KB</div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button data-id="${f.id}" class="btn secondary btn-inspect">Inspect</button>
+        <button data-id="${f.id}" class="btn btn-run">Run (Isolated)</button>
+        <button data-id="${f.id}" class="btn secondary btn-force">Force-tag malicious</button>
+        <button data-id="${f.id}" class="btn warn btn-del">Delete</button>
+      </div>`;
+    filesGrid.appendChild(el);
+  });
+
+  filesGrid.querySelectorAll('.btn-inspect').forEach(b => b.addEventListener('click', async ev=>{
+    const id = ev.currentTarget.getAttribute('data-id');
+    const rec = await getFileById(id);
+    if(!rec) return alert('File not found');
+    try {
+      const ab = await (rec.data.arrayBuffer ? rec.data.arrayBuffer() : (new Response(rec.data)).arrayBuffer());
+      const report = analyzeAll(ab);
+      showReport(rec, report);
+    } catch(e){
+      showReport(rec, null);
+    }
+  }));
+
+  filesGrid.querySelectorAll('.btn-run').forEach(b => b.addEventListener('click', async ev=>{
+    const id = ev.currentTarget.getAttribute('data-id');
+    const rec = await getFileById(id);
+    if(!rec) return alert('File not found');
+    if(!confirm('Start a simulated isolated run of "'+rec.name+'"? This will NOT execute the file.')) return;
+    startSimulatedProcess(rec);
+  }));
+
+  filesGrid.querySelectorAll('.btn-force').forEach(b => b.addEventListener('click', async ev=>{
+    const id = ev.currentTarget.getAttribute('data-id');
+    const rec = await getFileById(id);
+    if(!rec) return alert('File not found');
+    if(!confirm('Force-tag this stored file as "malicious" (simulation only)?')) return;
+    rec.tag = 'malicious';
+    try {
+      const blob = rec.data;
+      await putFileRecord(rec, blob);
+      log('File force-tagged as malicious: ' + rec.name);
+      await refreshAll();
+    } catch(err){
+      alert('Failed to update tag: ' + err);
+    }
+  }));
+
+  filesGrid.querySelectorAll('.btn-del').forEach(b => b.addEventListener('click', async ev=>{
+    const id = ev.currentTarget.getAttribute('data-id');
+    if(!confirm('Delete file from VM storage?')) return;
+    await deleteFileById(id);
+    await refreshAll();
+    log('Deleted file ' + id);
+  }));
+}
+
+/* ---------- Report display ---------- */
+function showReport(rec, report){
+  if(!rec) return;
+  let html = `<div><strong>Name:</strong> ${escapeHtml(rec.name)}</div>`;
+  html += `<div style="margin-top:8px"><strong>Drive:</strong> ${escapeHtml(rec.drive)}</div>`;
+  if(rec.tag) html += `<div style="margin-top:8px"><strong>Tag:</strong> <span class="tag">${escapeHtml(rec.tag)}</span></div>`;
+  if(!report){ html += `<div style="margin-top:8px" class="muted">No static analysis available.</div>`; reportArea.innerHTML = html; return; }
+  if(report.error){ html += `<div class="muted">Analysis error: ${escapeHtml(report.error)}</div>`; reportArea.innerHTML = html; return; }
+  html += `<div style="margin-top:8px"><strong>PE:</strong> ${report.isPE32Plus ? 'PE32+' : 'PE32'}, sections: ${report.numberOfSections}</div>`;
+  html += '<div style="margin-top:8px"><strong>Section entropy (raw):</strong><ul>';
+  report.sectionInfo.forEach(s => { html += `<li>${escapeHtml(s.name)} — raw ${s.rawSize} bytes — entropy ${s.entropy.toFixed(3)}</li>`; });
+  html += '</ul></div>';
+  html += `<div style="margin-top:8px"><strong>Imports (summary):</strong> ${report.importsSummary.length ? escapeHtml(report.importsSummary.join(', ')) : '<span class="muted">none</span>'}</div>`;
+  const gdiFound = (report.gdi && ((report.gdi.importedGdi && report.gdi.importedGdi.length) || (report.gdi.importMatches && report.gdi.importMatches.length) || (report.gdi.stringMatches && report.gdi.stringMatches.length)));
+  html += `<div style="margin-top:8px"><strong>GDI heuristics:</strong> ${gdiFound ? '<span class="danger">Possible GDI indicators</span>' : '<span class="muted">No obvious GDI imports/strings</span>'}</div>`;
+  if(report.overlay && report.overlay.overlaySize){
+    html += `<div style="margin-top:8px"><strong>Overlay (appended data):</strong> ${report.overlay.overlaySize} bytes — entropy ${report.overlay.entropy.toFixed(3)}</div>`;
+    html += `<div style="margin-top:8px"><strong>Overlay strings (sample):</strong><pre>${escapeHtml(report.overlay.sampleStrings.slice(0,80).join('\\n'))}</pre></div>`;
+    if(report.overlay.bmpAt >= 0) html += `<div class="muted">BMP detected in overlay at offset ${report.overlay.bmpAt}</div>`;
+    if(report.overlay.pngAt >= 0) html += `<div class="muted">PNG detected in overlay at offset ${report.overlay.pngAt}</div>`;
+    if(report.overlay.jpgAt >= 0) html += `<div class="muted">JPG detected in overlay at offset ${report.overlay.jpgAt}</div>`;
+  } else html += `<div style="margin-top:8px" class="muted">No overlay detected</div>`;
+  html += `<div style="margin-top:8px"><strong>C++ heuristics:</strong> MSVC mangled: ${report.cpp.msvc_mangled ? '<span class="danger">yes</span>' : '<span class="muted">no</span>'} ; typeinfo: ${report.cpp.typeinfo ? '<span class="danger">yes</span>' : '<span class="muted">no</span>'}</div>`;
+  html += `<div style="margin-top:8px"><strong>Hex preview (first bytes):</strong><pre>${escapeHtml(report.sampleHex)}</pre></div>`;
+  reportArea.innerHTML = html;
+}
+
+/* ---------- Simulated process manager (safe simulation) ---------- */
+const processes = {}; let nextPid = 1000;
+function renderProcessList(){
+  const keys = Object.keys(processes);
+  if(keys.length === 0){ processListEl.innerHTML = '<div class="muted">No processes</div>'; return; }
+  let html = '';
+  for(const p of Object.values(processes)) html += `<div><strong>${escapeHtml(p.name)}</strong> — pid ${p.pid} — status: ${escapeHtml(p.status)}</div>`;
+  processListEl.innerHTML = html;
+}
+function terminateProcess(pid, reason){
+  const proc = processes[pid];
+  if(!proc) return true;
+  proc.timers.forEach(t => clearInterval(t));
+  try { if(proc.popupWindow && !proc.popupWindow.closed) proc.popupWindow.close(); } catch(e){}
+  proc.status = 'terminated';
+  proc.terminatedAt = Date.now();
+  proc.terminationReason = reason;
+  log(`Process terminated: ${proc.name} (pid ${pid}) reason: ${reason}`);
+  delete processes[pid];
+  renderProcessList();
+  return true;
+}
+function startSimulatedProcess(fileRec){
+  const pid = nextPid++;
+  const name = fileRec.name;
+  const proc = { pid, name, fileId: fileRec.id, startTime: Date.now(), status:'running', popupWindow:null, timers:[], escapeAttempts:0 };
+  processes[pid] = proc;
+  log(`Simulated process started: ${name} (pid ${pid})`);
+  renderProcessList();
+  const popupHtml = makeDemoPopupHtml(name, pid);
+  const w = window.open('', `_sim_${pid}`, 'width=900,height=600');
+  if(w){ w.document.write(popupHtml); proc.popupWindow = w; const interval = setInterval(()=> { try{ if(w.closed){ clearInterval(interval); terminateProcess(pid,'popup_closed'); } }catch(e){} }, 1000); proc.timers.push(interval); } else log('Popup blocked for simulated process; running visualless.');
+  const tick = setInterval(()=> {
+    const baseChance = (fileRec.tag === 'malicious') ? 0.015 : 0.002;
+    if(Math.random() < baseChance){ proc.escapeAttempts++; handleEscape(proc); }
+  }, 1000);
+  proc.timers.push(tick);
+  proc.timers.push(setTimeout(()=> { if(proc.status === 'running') terminateProcess(pid,'auto_stop'); }, 1000*60*10));
+}
+function makeDemoPopupHtml(name, pid){
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Isolated Desktop — ${escapeHtml(name)}</title>
+  <style>body{margin:0;font-family:Arial;background:linear-gradient(120deg,#0b3b6f,#052b43);color:#fff} .bar{height:44px;background:rgba(0,0,0,0.2);display:flex;align-items:center;padding:8px;gap:8px} .box{padding:18px}</style></head><body>
+  <div class="bar"><div style="font-weight:700">Isolated Fake Desktop — ${escapeHtml(name)} (pid ${pid})</div><div style="margin-left:auto">Simulated</div></div>
+  <div class="box"><p>This window simulates an isolated desktop where the fake program runs visually. This popup never executes your file.</p>
+  <canvas id="c" width="800" height="420" style="border-radius:8px;display:block;background:#000"></canvas></div>
+  <script>
+    const canvas=document.getElementById('c'),ctx=canvas.getContext('2d'); let t=0; function loop(){ t+=0.02; ctx.fillStyle='rgba(0,0,0,0.12)'; ctx.fillRect(0,0,canvas.width,canvas.height); for(let i=0;i<40;i++){ ctx.fillStyle='hsla(' + ((t*40+i*7)%360) + ',80%,60%,0.25)'; ctx.fillRect((Math.sin(t+i)*0.5+0.5)*canvas.width, (Math.cos(t+i)*0.5+0.5)*canvas.height, 40, 28); } requestAnimationFrame(loop); } loop();
+    window.addEventListener('message',(ev)=>{ try{ const d=ev.data; if(d && d.type === 'sim_tick' && d.pid === ${pid}){} }catch(e){}});
+  </script></body></html>;
+}
+async function handleEscape(proc){
+  log(`Escape detected for ${proc.name} (pid ${proc.pid}). Initiating containment.`);
+  const maxAttempts = 8; let attempts = 0;
+  while(attempts < maxAttempts && processes[proc.pid] && processes[proc.pid].status !== 'terminated'){
+    attempts++;
+    log(`Attempting simulated taskkill for ${proc.name} — attempt ${attempts}`);
+    const result = terminateProcess(proc.pid, 'taskkill_attempt');
+    if(result) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  try {
+    if(processes[proc.pid] && processes[proc.pid].status !== 'terminated') terminateProcess(proc.pid, 'force_terminate');
+    await deleteFileById(proc.fileId);
+    log(`Backing file ${proc.name} deleted from fake drive as part of containment.`);
+    showContainmentAlert(proc.name);
+    await refreshAll();
+  } catch(e){ log('Error during containment cleanup: ' + e); }
+}
+function showContainmentAlert(name){
+  const msg = `Containment: simulated process "${name}" attempted escape and was terminated. Backing file deleted from fake drive.`;
+  reportArea.innerHTML = `<div class="danger">${escapeHtml(msg)}</div>` + reportArea.innerHTML;
+  log(msg);
+  try { alert(msg); } catch(e){}
+}
+
+/* Taskkill all */
+taskkillAllBtn.addEventListener('click', ()=> {
+  for(const pid of Object.keys(processes)) terminateProcess(pid, 'taskkill_all_by_user');
+  log('All simulated processes have been taskkilled by user.');
+});
+viewLogBtn.addEventListener('click', ()=> { alert('Event log shown in the right panel (most recent first). Simulation only.'); });
+
+/* ---------- Init ---------- */
+(async function init(){ await refreshAll(); log('Auto-analyzer active. Import files to analyze.'); })();
+
+</script>
+</body>
+</html>
